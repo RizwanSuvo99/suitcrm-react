@@ -1,0 +1,24 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+.vscode/
+.idea/
+.turbo/
+.pnpm-store/
+playwright-report/
+test-results/
+
+# env files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# generated prisma client (kept out of vcs; regenerated via prisma generate)
+apps/api/src/generated/
+
+# local docker volumes
+.docker-data/
