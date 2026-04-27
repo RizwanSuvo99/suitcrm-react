@@ -3,7 +3,17 @@ import argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
-const MODULES = ['accounts', 'contacts', 'leads', 'opportunities', 'cases'] as const;
+const MODULES = [
+  'accounts',
+  'contacts',
+  'leads',
+  'opportunities',
+  'cases',
+  'calls',
+  'meetings',
+  'tasks',
+  'notes',
+] as const;
 const ACTIONS = ['read', 'write', 'delete'] as const;
 
 async function upsertPermissions() {
@@ -84,20 +94,27 @@ async function main() {
       update: {},
     });
   }
-  // Sales Manager gets read+write on all sales modules.
-  const salesModules = ['accounts', 'contacts', 'leads', 'opportunities'];
-  for (const p of allPermissions.filter(
-    (p) => salesModules.includes(p.module) && p.action !== 'delete',
-  )) {
+  // Sales Manager: read+write+delete across sales modules and activities.
+  const salesScope = [
+    'accounts',
+    'contacts',
+    'leads',
+    'opportunities',
+    'calls',
+    'meetings',
+    'tasks',
+    'notes',
+  ];
+  for (const p of allPermissions.filter((p) => salesScope.includes(p.module))) {
     await prisma.rolePermission.upsert({
       where: { roleId_permissionId: { roleId: salesManager.id, permissionId: p.id } },
       create: { roleId: salesManager.id, permissionId: p.id },
       update: {},
     });
   }
-  // Sales Rep gets the same as manager for now (refined in Phase 2).
+  // Sales Rep: read+write on sales scope (no delete).
   for (const p of allPermissions.filter(
-    (p) => salesModules.includes(p.module) && p.action !== 'delete',
+    (p) => salesScope.includes(p.module) && p.action !== 'delete',
   )) {
     await prisma.rolePermission.upsert({
       where: { roleId_permissionId: { roleId: salesRep.id, permissionId: p.id } },

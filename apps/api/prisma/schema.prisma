@@ -1,5 +1,11 @@
-// SuiteCRM-modern — Phase 1 schema (identity, access, audit only).
-// Subsequent phases extend this file with CRM business entities.
+// SuiteCRM-modern schema.
+//
+// Sections:
+//   ── Identity & access ─ tenants, users, roles, permissions, refresh tokens
+//   ── Audit ─ tenant-scoped audit log
+//   ── CRM modules ─ accounts, contacts, leads, opportunities, cases
+//   ── Activities ─ calls, meetings, tasks, notes (polymorphic parent_type/parent_id)
+//   ── Counters ─ per-tenant case-number sequence
 
 generator client {
   provider = "prisma-client-js"
@@ -147,4 +153,271 @@ model AuditLog {
   @@index([tenantId, entityType, entityId])
   @@index([tenantId, createdAt])
   @@map("audit_logs")
+}
+
+// ── CRM enums ───────────────────────────────────────────────────────────────
+//
+// Stored as plain text columns (not Postgres enums) so the runtime values
+// match the canonical SuiteCRM strings (e.g. "Pending Input", "Id. Decision
+// Makers") *and* the wire format used by Zod and the frontend. Prisma enums
+// would force us to use TS-friendly identifiers and translate at every read/
+// write — not worth it for the marginal validation benefit. Allowed values
+// are enforced at the API boundary by Zod schemas in @suitecrm/shared.
+
+// ── CRM business entities ───────────────────────────────────────────────────
+
+model Account {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  name           String
+  website        String?
+  phone          String?
+  email          String?
+  industry       String?
+  annualRevenue  Decimal?  @map("annual_revenue") @db.Decimal(18, 2)
+  employees      Int?
+  billingAddress Json?     @map("billing_address")
+  shippingAddress Json?    @map("shipping_address")
+  parentAccountId String?  @map("parent_account_id") @db.Uuid
+  assignedUserId String?   @map("assigned_user_id") @db.Uuid
+  description    String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  deletedAt      DateTime? @map("deleted_at")
+
+  parentAccount  Account?  @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  childAccounts  Account[] @relation("AccountHierarchy")
+  contacts       Contact[]
+  opportunities  Opportunity[]
+  cases          Case[]
+
+  @@index([tenantId])
+  @@index([tenantId, name])
+  @@index([tenantId, deletedAt])
+  @@map("accounts")
+}
+
+model Contact {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  firstName      String    @map("first_name")
+  lastName       String    @map("last_name")
+  title          String?
+  email          String?
+  phoneWork      String?   @map("phone_work")
+  phoneMobile    String?   @map("phone_mobile")
+  accountId      String?   @map("account_id") @db.Uuid
+  assignedUserId String?   @map("assigned_user_id") @db.Uuid
+  doNotCall      Boolean   @default(false) @map("do_not_call")
+  leadSource     String?   @map("lead_source")
+  description    String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  deletedAt      DateTime? @map("deleted_at")
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  cases   Case[]
+
+  @@index([tenantId])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, accountId])
+  @@index([tenantId, deletedAt])
+  @@map("contacts")
+}
+
+model Lead {
+  id                     String     @id @default(uuid()) @db.Uuid
+  tenantId               String     @map("tenant_id") @db.Uuid
+  firstName              String     @map("first_name")
+  lastName               String     @map("last_name")
+  title                  String?
+  email                  String?
+  phone                  String?
+  company                String?
+  status                 String     @default("New")
+  leadSource             String?    @map("lead_source")
+  assignedUserId         String?    @map("assigned_user_id") @db.Uuid
+  convertedAt            DateTime?  @map("converted_at")
+  convertedContactId     String?    @map("converted_contact_id") @db.Uuid
+  convertedAccountId     String?    @map("converted_account_id") @db.Uuid
+  convertedOpportunityId String?    @map("converted_opportunity_id") @db.Uuid
+  description            String?
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+  createdBy              String?    @map("created_by") @db.Uuid
+  updatedBy              String?    @map("updated_by") @db.Uuid
+  deletedAt              DateTime?  @map("deleted_at")
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, deletedAt])
+  @@map("leads")
+}
+
+model Opportunity {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  name           String
+  accountId      String?    @map("account_id") @db.Uuid
+  amount         Decimal?   @db.Decimal(18, 2)
+  currency       String     @default("USD")
+  salesStage     String     @default("Prospecting") @map("sales_stage")
+  probability    Int?
+  closeDate      DateTime?  @map("close_date") @db.Date
+  leadSource     String?    @map("lead_source")
+  assignedUserId String?    @map("assigned_user_id") @db.Uuid
+  description    String?
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  createdBy      String?    @map("created_by") @db.Uuid
+  updatedBy      String?    @map("updated_by") @db.Uuid
+  deletedAt      DateTime?  @map("deleted_at")
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, salesStage])
+  @@index([tenantId, accountId])
+  @@index([tenantId, deletedAt])
+  @@map("opportunities")
+}
+
+model Case {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  caseNumber     Int          @map("case_number")
+  subject        String
+  accountId      String?      @map("account_id") @db.Uuid
+  contactId      String?      @map("contact_id") @db.Uuid
+  status         String       @default("New")
+  priority       String       @default("Medium")
+  type           String?
+  assignedUserId String?      @map("assigned_user_id") @db.Uuid
+  description    String?
+  resolution     String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  createdBy      String?      @map("created_by") @db.Uuid
+  updatedBy      String?      @map("updated_by") @db.Uuid
+  deletedAt      DateTime?    @map("deleted_at")
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, caseNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
+  @@map("cases")
+}
+
+// ── Activities (polymorphic parent_type / parent_id) ────────────────────────
+
+model Call {
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  subject         String
+  status          String              @default("Planned")
+  direction       String              @default("Outbound")
+  startsAt        DateTime?           @map("starts_at")
+  durationMinutes Int?                @map("duration_minutes")
+  parentType      String?             @map("parent_type")
+  parentId        String?             @map("parent_id") @db.Uuid
+  description     String?
+  assignedUserId  String?             @map("assigned_user_id") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  createdBy       String?             @map("created_by") @db.Uuid
+  updatedBy       String?             @map("updated_by") @db.Uuid
+  deletedAt       DateTime?           @map("deleted_at")
+
+  @@index([tenantId])
+  @@index([tenantId, parentType, parentId])
+  @@index([tenantId, deletedAt])
+  @@map("calls")
+}
+
+model Meeting {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @map("tenant_id") @db.Uuid
+  subject        String
+  status         String              @default("Planned")
+  location       String?
+  startsAt       DateTime?           @map("starts_at")
+  endsAt         DateTime?           @map("ends_at")
+  parentType     String?             @map("parent_type")
+  parentId       String?             @map("parent_id") @db.Uuid
+  description    String?
+  assignedUserId String?             @map("assigned_user_id") @db.Uuid
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  createdBy      String?             @map("created_by") @db.Uuid
+  updatedBy      String?             @map("updated_by") @db.Uuid
+  deletedAt      DateTime?           @map("deleted_at")
+
+  @@index([tenantId])
+  @@index([tenantId, parentType, parentId])
+  @@index([tenantId, startsAt])
+  @@index([tenantId, deletedAt])
+  @@map("meetings")
+}
+
+model Task {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @map("tenant_id") @db.Uuid
+  subject        String
+  status         String              @default("Not Started")
+  priority       String              @default("Medium")
+  dueDate        DateTime?           @map("due_date") @db.Date
+  parentType     String?             @map("parent_type")
+  parentId       String?             @map("parent_id") @db.Uuid
+  description    String?
+  assignedUserId String?             @map("assigned_user_id") @db.Uuid
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  createdBy      String?             @map("created_by") @db.Uuid
+  updatedBy      String?             @map("updated_by") @db.Uuid
+  deletedAt      DateTime?           @map("deleted_at")
+
+  @@index([tenantId])
+  @@index([tenantId, parentType, parentId])
+  @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
+  @@map("tasks")
+}
+
+model Note {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @map("tenant_id") @db.Uuid
+  subject        String
+  body           String?
+  parentType     String?             @map("parent_type")
+  parentId       String?             @map("parent_id") @db.Uuid
+  assignedUserId String?             @map("assigned_user_id") @db.Uuid
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  createdBy      String?             @map("created_by") @db.Uuid
+  updatedBy      String?             @map("updated_by") @db.Uuid
+  deletedAt      DateTime?           @map("deleted_at")
+
+  @@index([tenantId])
+  @@index([tenantId, parentType, parentId])
+  @@index([tenantId, deletedAt])
+  @@map("notes")
+}
+
+// ── Counters ────────────────────────────────────────────────────────────────
+
+// Per-tenant case-number sequence. Allocated inside a transaction with
+// `SELECT ... FOR UPDATE` so two concurrent case creates can't collide.
+model CaseCounter {
+  tenantId  String @id @map("tenant_id") @db.Uuid
+  lastValue Int    @default(0) @map("last_value")
+
+  @@map("case_counters")
 }
